@@ -225,11 +225,48 @@ module mkMD5 (MD5_IFC);
     Reg #(Bit #(32)) dd <- mkReg(0);
 
     Reg #(Bool) done <- mkReg(True);
+    Reg #(Bool) st_rst <- mkReg(False);
+    Reg #(Bool) st_buffer_done <- mkReg(False);
 
     /* rules */
-    (* execution_order = "req, md5Step" *)
+    (* execution_order = "req, rl_reset" *)
+    rule rl_reset (st_rst);
+        // 메시지를 리틀엔디안 형식으로 저장
+        w[0] <= toLE32(message[31:0]);
+        w[1] <= toLE32(message[63:32]);
+        w[2] <= toLE32(message[95:64]);
+        w[3] <= toLE32(message[127:96]);
+        w[4] <= toLE32(message[159:128]);
+        w[5] <= toLE32(message[191:160]);
+        w[6] <= toLE32(message[223:192]);
+        w[7] <= toLE32(message[255:224]);
+
+        w[8] <= toLE32(message[287:256]);
+        w[9] <= toLE32(message[319:288]);
+        w[10] <= toLE32(message[351:320]);
+        w[11] <= toLE32(message[383:352]);
+        w[12] <= toLE32(message[415:384]);
+        w[13] <= toLE32(message[447:416]);
+        w[14] <= toLE32(message[479:448]);
+        w[15] <= toLE32(message[511:480]);
+
+        $display("ctxBuffer[0]: %x", ctxBuffer[0]);
+        $display("ctxBuffer[1]: %x", ctxBuffer[1]);
+        $display("ctxBuffer[2]: %x", ctxBuffer[2]);
+        $display("ctxBuffer[3]: %x", ctxBuffer[3]);
+        $display("message: %x", message);
+        i_step <= 0;
+        st_rst <= False;
+    endrule
+
+    (* execution_order = "req, rl_reset, md5Step" *)
     rule md5Step (/*state == MD5_STEP && */i_step < 64 && !done);
         $display("[%d] md5Step", i_step);
+        $display("aa: %x", aa);
+        $display("bb: %x", bb);
+        $display("cc: %x", cc);
+        $display("dd: %x", dd);
+
         Bit #(32) temp = 32'b0;
         Bit #(32) ee = 32'b0;
         Bit #(32) j = 32'b0;
@@ -257,22 +294,32 @@ module mkMD5 (MD5_IFC);
         i_step <= i_step + 1;
     endrule
 
-    (* execution_order = "req, md5Step, md5StepDone" *)
+    (* execution_order = "req, rl_reset, md5Step, md5StepDone" *)
     rule md5StepDone (i_step >= 64);
         ctxBuffer[0] <= ctxBuffer[0] + aa;
         ctxBuffer[1] <= ctxBuffer[1] + bb;
         ctxBuffer[2] <= ctxBuffer[2] + cc;
         ctxBuffer[3] <= ctxBuffer[3] + dd;
-        digest <= { ctxBuffer[0], ctxBuffer[1], ctxBuffer[2], ctxBuffer[3] };
-        done <= True;
+
+        st_buffer_done <= True;
         i_step <= 0;
-        $display("digest: %x", digest);
+    endrule
+
+    (* execution_order = "req, rl_reset, md5Step, md5StepDone, md5BufferDone" *)
+    rule md5BufferDone (st_buffer_done);
+        Bit #(128) dgist = { ctxBuffer[0], ctxBuffer[1], ctxBuffer[2], ctxBuffer[3] };
+        //digest <= { ctxBuffer[0], ctxBuffer[1], ctxBuffer[2], ctxBuffer[3] };
+        digest <= dgist;
+        $display("digest: %x", dgist);
+        done <= True;
+        st_buffer_done <= False;
     endrule
 
     // MD5 Interface: request
     // 64비트 고정 길이 메시지가 입력된다. (v1=rs1_val1)
     method Action req (Bit #(64) v1);
         done <= False;
+        st_buffer_done <= False;
         $display("method req called");
         $display("v1: %x", v1);
 
@@ -285,37 +332,12 @@ module mkMD5 (MD5_IFC);
         bb <= genB;
         cc <= genC;
         dd <= genD;
+
         //let littleLen = 64'h4000_0000_0000_0000; // 64bit message length
         //let msglen = 64'h40; // 64bit message length
         // padding=512-64-1-64=383
         message <= { v1, 1'b1, 383'b0, /*littleLen*//*msglen*/64'h40 };
-
-        // 메시지를 리틀엔디안 형식으로 저장
-        w[0] <= toLE32(message[31:0]);
-        w[1] <= toLE32(message[63:32]);
-        w[2] <= toLE32(message[95:64]);
-        w[3] <= toLE32(message[127:96]);
-        w[4] <= toLE32(message[159:128]);
-        w[5] <= toLE32(message[191:160]);
-        w[6] <= toLE32(message[223:192]);
-        w[7] <= toLE32(message[255:224]);
-
-        w[8] <= toLE32(message[287:256]);
-        w[9] <= toLE32(message[319:288]);
-        w[10] <= toLE32(message[351:320]);
-        w[11] <= toLE32(message[383:352]);
-        w[12] <= toLE32(message[415:384]);
-        w[13] <= toLE32(message[447:416]);
-        w[14] <= toLE32(message[479:448]);
-        w[15] <= toLE32(message[511:480]);
-        
-        i_step <= 0;
-
-        $display("ctxBuffer[0]: %x", ctxBuffer[0]);
-        $display("ctxBuffer[1]: %x", ctxBuffer[1]);
-        $display("ctxBuffer[2]: %x", ctxBuffer[2]);
-        $display("ctxBuffer[3]: %x", ctxBuffer[3]);
-        $display("message: %x", message);
+        st_rst <= True;
     endmethod
 
     // MD5 Interface: response
